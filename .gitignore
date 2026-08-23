@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+dist/
+build/
+out/
+
+# TraktCLI
+.trakt.yaml
+.trakt.yaml.bak
+.trakt.yaml.tmp
+
+# SQLite cache
+*.db
+*.sqlite
+*.sqlite3
+
+# Config
+config.json
+.trakt-pi-agent-config.json
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+*.lnk
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS temp
+*.tmp
+*.temp
+
+# Understory
+.understory-project-id
