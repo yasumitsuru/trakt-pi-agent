@@ -1,18 +1,20 @@
-# Dependencies
-node_modules/
-dist/
-build/
-out/
+# Environment / secrets
+.env
+.env.*
+!.env.example
 
-# TraktCLI
+# TraktCLI credentials
 .trakt.yaml
 .trakt.yaml.bak
 .trakt.yaml.tmp
 
-# SQLite cache
+# SQLite
 *.db
 *.sqlite
 *.sqlite3
+*.db-shm
+*.db-wal
+*.db-journal
 
 # Config
 config.json
@@ -21,6 +23,12 @@ config.json
 # Logs
 logs/
 *.log
+
+# Node
+node_modules/
+dist/
+build/
+out/
 
 # OS
 .DS_Store

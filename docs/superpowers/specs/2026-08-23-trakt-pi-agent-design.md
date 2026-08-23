@@ -74,7 +74,7 @@ Controls:
 
 - First (initial) synchronization
 - Incremental synchronization
-- TTL (default: 5 minutes)
+- TTL (default: 5 minutes; configurable in v1)
 - Resource state tracking
 - Cache fallback
 
@@ -210,7 +210,7 @@ Versioned migrations from v1 onward.
 
 #### 7.1 Default TTL
 
-5 minutes. Configurable in future.
+The default synchronization check TTL is 5 minutes and MUST be user-configurable in v1.
 
 #### 7.2 First Synchronization
 
@@ -446,7 +446,7 @@ External dependency:
 The MCP server must:
 
 1. Locate `trakt-cli` via PATH
-2. (Future) Allow configured explicit path
+2. Allow configured explicit path (v1)
 3. Validate existence before dependent operations
 
 #### Repository Rules
@@ -472,6 +472,33 @@ No official affiliation is implied.
 ### 16. License
 
 MIT License.
+
+### 17. Error Handling Strategy
+
+#### 17.1 Cache Available + Trakt Unavailable
+
+Respond using local SQLite with stale indicator:
+
+```json
+{
+  "source": "cache",
+  "stale": true,
+  "last_sync": "...",
+  "items": []
+}
+```
+
+#### 17.2 No Cache + Trakt Unavailable
+
+Return a clear error indicating that no data is available and the Trakt service is unreachable.
+
+#### 17.3 Authentication Error
+
+Do not expose tokens. Return a sanitized error indicating that TraktCLI authentication needs to be renewed or revalidated.
+
+#### 17.4 Invalid TraktCLI Data
+
+Do not silently write partially interpreted data to SQLite. Fail the synchronization operation for that resource with a sanitized error.
 
 ---
 
@@ -518,6 +545,41 @@ Cache SQLite      Motor de Sincronização
    |          |         (somente leitura)
    +----------+---------------+
 ```
+
+#### 3.1 Camada MCP
+
+Expõe ferramentas MCP padronizadas. Sem lógica específica de cliente.
+
+#### 3.2 Adaptador TraktCLI
+
+Executa e interpreta comandos `trakt-cli`. Localiza via PATH.
+
+#### 3.3 Adaptador API Trakt
+
+Utiliza apenas endpoints somente leitura não adequadamente expostos pelo CLI.
+Caso importante: `/sync/last_activities`
+
+#### 3.4 Cache SQLite
+
+Armazena dados normalizados localmente em um único banco SQLite.
+
+#### 3.5 Motor de Sincronização
+
+Controla:
+
+- Primeira (inicial) sincronização
+- Sincronização incremental
+- TTL (padrão: 5 minutos; configurável na v1)
+- Rastreamento de estado dos recursos
+- Fallback para cache
+
+#### 3.6 Classificação
+
+Classifica conteúdo como:
+
+- `movie`
+- `series`
+- `anime`
 
 ### 4. Classificação Filmes / Séries / Animes
 
@@ -571,21 +633,120 @@ Sem dados sensíveis nesses arquivos.
 
 ### 6. Modelo de Dados
 
-(Ver seção 6 em English — idêntico)
+#### 6.1 Media
+
+```
+media
+- trakt_id (PK)
+- trakt_type
+- category
+- title
+- year
+- genres
+- metadata_updated_at
+- cached_at
+```
+
+#### 6.2 History
+
+```
+history
+- id (PK)
+- media_id (FK → media)
+- season
+- episode
+- watched_at
+- trakt_history_id
+```
+
+#### 6.3 Progress
+
+```
+progress
+- media_id (PK, FK → media)
+- aired
+- watched
+- remaining
+- percent
+- next_episode
+```
+
+#### 6.4 Watchlist
+
+```
+watchlist
+- media_id (PK, FK → media)
+- listed_at
+```
+
+#### 6.5 Sync State
+
+```
+sync_state
+- resource (PK)
+- last_activity
+- last_sync
+- status
+```
+
+#### 6.6 Search Cache
+
+```
+search_cache
+- query_hash (PK)
+- query
+- response
+- expires_at
+```
+
+Migrations versionadas da v1 em diante.
 
 ### 7. Sincronização
 
 #### 7.1 TTL Padrão
 
-5 minutos. Configurável no futuro.
+O TTL padrão de verificação de sincronização é de 5 minutos e DEVE ser configurável pelo usuário na v1.
 
 #### 7.2 Primeira Sincronização
 
 Não automática no startup do MCP. Lazy / on-demand.
 
+```
+primeira ferramenta que precisa de dados
+        |
+cache não inicializado
+        |
+sincronização inicial completa
+        |
+SQLite
+```
+
 #### 7.3 Sincronizações Subsequentes
 
 Sincronização incremental usando `/sync/last_activities`.
+
+```
+consulta
+   |
+cache < 5 min?
+ |          |
+sim        não
+ |          |
+SQLite     last_activities
+              |
+          mudou?
+          |     |
+         não   sim
+          |     |
+       cache   sincroniza apenas
+               recursos alterados
+```
+
+Não confiar exclusivamente em `watched_at` porque:
+
+- Itens antigos podem ser adicionados posteriormente
+- Itens podem ser removidos
+- Mudanças retroativas precisam ser detectadas
 
 #### 7.4 Comportamento Offline
 
@@ -593,6 +754,15 @@ Se cache existe e Trakt indisponível:
 
 - Responder do cache local
 - Indicar que dados podem estar desatualizados
+
+```json
+{
+  "source": "cache",
+  "stale": true,
+  "last_sync": "...",
+  "items": []
+}
+```
 
 Se não há cache inicial e Trakt indisponível:
 
@@ -611,29 +781,184 @@ Se não há cache inicial e Trakt indisponível:
 | `trakt_sync_status` | Verificar status sync |
 | `trakt_cache_stats` | Ver estatísticas do cache |
 
+#### 8.1 Filtros
+
+Onde aplicável:
+
+```
+category:
+  all
+  movie
+  series
+  anime
+```
+
+Exemplo:
+
+```
+trakt_history(
+  category = "anime",
+  limit = 50
+)
+```
+
+Sem ferramentas separadas por categoria (ex.: `trakt_anime_history`). Usar filtros.
+
+#### 8.2 Limites de Resposta
+
+Para proteger janelas de contexto dos LLMs:
+
+```
+default limit = 50
+maximum limit = 250
+```
+
+Nenhuma ferramenta deve despejar milhares de registros por padrão.
+
 ### 9. Segurança e Autenticação
 
-(Ver seção 9 em English — idêntico)
+TraktCLI armazena autenticação em `~/.trakt.yaml`.
+
+O servidor MCP poderá **ler localmente** este arquivo para reutilizar autenticação em operações somente leitura não expostas diretamente pelo CLI.
+
+#### Regras Obrigatórias
+
+- Nunca copiar tokens para SQLite
+- Nunca versionar `.trakt.yaml`
+- Nunca colocar access token em logs
+- Nunca colocar refresh token em logs
+- Nunca colocar client ID em logs
+- Nunca colocar client secret em logs
+- Nunca retornar essas credenciais via ferramentas MCP
+- Nunca enviar credenciais para serviços externos que não sejam o próprio Trakt
+
+#### Garantia Somente Leitura da v1
+
+Sem ferramentas para:
+
+- Adicionar histórico
+- Remover histórico
+- Adicionar watchlist
+- Remover watchlist
+- Ratings
+- Check-in
+- Scrobble
+- Qualquer mutação remota
+
+`trakt_sync` pode modificar apenas o cache SQLite local.
 
 ### 10. Estrutura Planejada do Projeto
 
-(Ver seção 10 em English — idêntico)
+```
+src/
+├── mcp/
+│   ├── server.ts
+│   └── tools/
+├── trakt/
+│   ├── cli.ts
+│   ├── api.ts
+│   ├── auth.ts
+│   └── types.ts
+├── sync/
+│   ├── initial-sync.ts
+│   ├── incremental-sync.ts
+│   └── last-activities.ts
+├── cache/
+│   ├── database.ts
+│   ├── migrations.ts
+│   └── repositories/
+├── classification/
+│   └── media-category.ts
+├── config/
+│   ├── paths.ts
+│   └── config.ts
+└── index.ts
+```
+
+Nem todos os arquivos precisam ser criados vazios. Scaffold conforme necessário.
 
 ### 11. Plano de Testes
 
-(Ver seção 11 em English — idêntico)
+#### 11.1 Testes Unitários
+
+- Classificação Filmes / Séries / Animes
+- Lógica de TTL
+- Regras de cache
+- Caminhos multiplataforma
+- Parsing de TraktCLI
+- Filtros MCP
+
+#### 11.2 Testes de Integração
+
+- SQLite
+- Migrations
+- Sincronização inicial
+- Sincronização incremental
+- Comportamento de cache stale
+
+#### 11.3 Testes de Contrato
+
+- Schemas de ferramentas MCP
+- Respostas estruturadas
+
+#### 11.4 Testes Smoke
+
+- Servidor stdio inicia
+- MCP tools/list funciona
+
+Testes automatizados **não devem** usar a conta real de Trakt do desenvolvedor. Usar fixtures/mocks.
+
+Teste live deve ser explicitamente opt-in:
+
+```
+npm run test:live
+```
 
 ### 12. CI (Planejado)
 
-(Ver seção 12 em English — idêntico)
+GitHub Actions para testar:
+
+- Windows
+- Linux
+- macOS
+
+E executar:
+
+```
+lint
+typecheck
+test
+build
+```
 
 ### 13. Dependência TraktCLI
 
-(Ver seção 13 em English — idêntico)
+Dependência externa:
+
+- **Repositório:** [omarshahine/trakt-plugin](https://github.com/omarshahine/trakt-plugin)
+- **Executável:** `trakt-cli` / `trakt-cli.exe`
+
+O servidor MCP deve:
+
+1. Localizar `trakt-cli` via PATH
+2. Permitir caminho explícito configurado (v1)
+3. Validar existência antes de operações dependentes
+
+#### Regras do Repositório
+
+- NÃO copiar código TraktCLI
+- NÃO redistribuir seu executável na v1
+- NÃO embutir credenciais no código
+- Exigir que o usuário tenha TraktCLI pré-instalado e autenticado
 
 ### 14. Créditos
 
-(Ver seção 14 em English — idêntico)
+Este projeto depende e reconhece:
+
+- **[omarshahine/trakt-plugin](https://github.com/omarshahine/trakt-plugin)** — ferramenta TraktCLI para autenticação e interação com Trakt.tv. Obrigado, Omar e todos os contribuidores.
+- **[angristan/trakt-cli](https://github.com/angristan/trakt-cli)** — o projeto upstream que inspirou este trabalho.
+
+Nenhuma afiliação oficial é implícita.
 
 ### 15. Aviso
 
@@ -643,40 +968,32 @@ Se não há cache inicial e Trakt indisponível:
 
 Licença MIT.
 
----
+### 17. Estratégia de Tratamento de Erros
 
-## Specification Review
+#### 17.1 Cache Disponível + Trakt Indisponível
 
-### 16.1 Review Findings
+Responder usando SQLite local com indicador stale:
 
-| # | Type | Finding | Status |
-|---|------|---------|--------|
-| 1 | TODO | Implementation deferred to Phase 1+ | ACCEPTED — by design |
-| 2 | TBD | Configurable TTL (future) | ACCEPTED — noted as future |
-| 3 | Placeholder | Explicit path for TraktCLI (future) | ACCEPTED — noted as future |
-| 4 | Contradiction | None found | PASS |
-| 5 | Ambiguity | None found | PASS |
-| 6 | EN/PT-BR inconsistency | PT-BR section 6 references English section | ACCEPTED — intentional cross-reference |
-| 7 | Security gap | No explicit mention of `.trakt.yaml` path resolution | TODO — add in Phase 1 |
-| 8 | Missing | Error handling strategy | TODO — add in Phase 1 |
+```json
+{
+  "source": "cache",
+  "stale": true,
+  "last_sync": "...",
+  "items": []
+}
+```
 
-### 16.2 Corrections Applied
+#### 17.2 Sem Cache + Trakt Indisponível
 
-- Clarified that `trakt_type` and `category` are separate concepts
-- Added explicit response limit defaults (50/250)
-- Added offline behavior specification
-- Added explicit TraktCLI dependency rules
-- Added credit section with both upstream projects
-- Added bilingual disclaimer
+Retornar erro claro indicando que não há dados disponíveis e o serviço Trakt é inacessível.
 
-### 16.3 Outstanding TODOs (Phase 1+)
+#### 17.3 Erro de Autenticação
 
-- [ ] TraktCLI explicit path configuration
-- [ ] Configurable TTL implementation
-- [ ] Error handling strategy
-- [ ] Logging strategy
-- [ ] PT-BR section 6 full translation
-- [ ] PT-BR section 10 full translation
+Não expor tokens. Retornar erro sanitizado indicando que a autenticação TraktCLI precisa ser renovada ou revalidada.
+
+#### 17.4 Dados Inválidos do TraktCLI
+
+Não gravar dados parcialmente interpretados silenciosamente no SQLite. Falhar a operação de sincronização daquele recurso com erro sanitizado.
 
 ---
 
