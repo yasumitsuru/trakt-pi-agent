@@ -7,6 +7,7 @@ export interface DiscoverTraktCliOptions {
   pathEnv?: string;
   platform?: NodeJS.Platform;
   exists?: (candidate: string) => boolean;
+  getConfiguredPath?: () => string | null;
 }
 
 const DEFAULT_CLI_NAME_WIN = "trakt-cli.exe";
@@ -25,8 +26,13 @@ const DEFAULT_CLI_NAME_UNIX = "trakt-cli";
 export function discoverTraktCli(
   options?: DiscoverTraktCliOptions,
 ): string | null {
-  const configuredPath =
-    options?.configuredPath ?? getTraktCliPath();
+  // Use property-presence semantics: configuredPath: null explicitly means
+  // "no configured path" and must NOT fall through to production config.
+  const hasConfiguredPath =
+    options != null && Object.prototype.hasOwnProperty.call(options, "configuredPath");
+  const configuredPath = hasConfiguredPath
+    ? options.configuredPath
+    : (options?.getConfiguredPath ?? getTraktCliPath)();
 
   // 1. Configured explicit path has priority.
   if (configuredPath != null && configuredPath.length > 0) {
