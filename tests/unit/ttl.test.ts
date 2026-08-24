@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
-import { getTtlSeconds, loadConfig, type AppConfig } from "../../src/config/config";
+import { loadConfig, type AppConfig } from "../../src/config/config";
 
 function createTmpDir(): string {
   const tmpDir = path.join(os.tmpdir(), `trakt-test-${crypto.randomUUID()}`);
@@ -27,8 +27,8 @@ describe("ttl", () => {
   });
 
   it("returns default TTL of 300 when no config exists", () => {
-    const ttl = getTtlSeconds();
-    expect(ttl).toBe(300);
+    const loaded = loadConfig({ dataDir: tmpDir });
+    expect(loaded.ttlSeconds).toBe(300);
   });
 
   it("returns TTL from valid config.json", () => {
@@ -42,9 +42,11 @@ describe("ttl", () => {
 
   it("uses defaults when config.json is absent", () => {
     const cfgPath = path.join(tmpDir, "nonexistent.json");
-    const loaded = loadConfig(cfgPath);
+    const loaded = loadConfig({ configPath: cfgPath });
     expect(loaded.ttlSeconds).toBe(300);
     expect(loaded.traktCliPath).toBeNull();
+    expect(loaded.cacheDbPath).toBe(path.join(tmpDir, "trakt-cache.db"));
+    expect(loaded.configPath).toBe(cfgPath);
   });
 
   it("returns configured TraktCLI path", () => {
@@ -61,20 +63,18 @@ describe("ttl", () => {
     const cfgPath = path.join(tmpDir, "config.json");
     fs.writeFileSync(cfgPath, JSON.stringify(cfg), "utf8");
 
-    const loaded = loadConfig(cfgPath);
+    const loaded = loadConfig({ configPath: cfgPath });
     expect(loaded.traktCliPath).toBeNull();
   });
 
   it("derives cacheDbPath from data directory", () => {
-    const cfgPath = path.join(tmpDir, "config.json");
-    const loaded = loadConfig(cfgPath);
-    expect(loaded.cacheDbPath).toContain("trakt-cache.db");
+    const loaded = loadConfig({ dataDir: tmpDir });
+    expect(loaded.cacheDbPath).toBe(path.join(tmpDir, "trakt-cache.db"));
   });
 
   it("derives configPath from data directory", () => {
-    const cfgPath = path.join(tmpDir, "config.json");
-    const loaded = loadConfig(cfgPath);
-    expect(loaded.configPath).toContain("config.json");
+    const loaded = loadConfig({ dataDir: tmpDir });
+    expect(loaded.configPath).toBe(path.join(tmpDir, "config.json"));
   });
 
   describe("loadConfig with dataDir option", () => {
