@@ -1,6 +1,114 @@
+import * as cp from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { getTraktCliPath } from "../config/config.js";
+
+// Credential-like patterns to sanitize from stderr
+const CRED_PATTERNS = [
+  /token[=:]\s*\S+/gi,
+  /key[=:]\s*\S+/gi,
+  /secret[=:]\s*\S+/gi,
+  /password[=:]\s*\S+/gi,
+  /api[_-]?key[=:]\s*\S+/gi,
+  /client_id[=:]\s*\S+/gi,
+  /Bearer\s+\S+/gi,
+];
+
+function sanitizeStderr(raw: string): string {
+  let out = raw;
+  for (const pat of CRED_PATTERNS) {
+    out = out.replace(pat, (m) => {
+      const eq = m.indexOf("=");
+      const prefix = eq > -1 ? m.slice(0, eq + 1) : m.slice(0, 6);
+      return prefix + "***";
+    });
+  }
+  return out;
+}
+
+export interface ExecuteTraktCliOptions {
+  timeoutMs?: number;
+}
+
+export interface ExecuteTraktCliResult {
+  ok: boolean;
+  data?: unknown;
+  error?: string;
+}
+
+/**
+ * Execute TraktCLI via child_process.spawn (no shell).
+ *
+ * - Arguments passed as array (no shell expansion).
+ * - stdout parsed as JSON on success.
+ * - Non-zero exit throws.
+ * - Timeout kills the child and throws.
+ * - stderr credential patterns are sanitized.
+ */
+export async function executeTraktCli(
+  cliPath: string,
+  args: string[],
+  opts?: ExecuteTraktCliOptions,
+): Promise<unknown> {
+  const timeoutMs = opts?.timeoutMs ?? 30_000;
+
+  const child: ReturnType<typeof cp.spawn> = cp.spawn(
+    cliPath,
+    args,
+    { shell: false } as cp.SpawnOptions,
+  );
+
+  const stdoutBuf: Buffer[] = [];
+  const stderrBuf: Buffer[] = [];
+
+  child.stdout!.on("data", (buf: Buffer) => stdoutBuf.push(buf));
+  child.stderr!.on("data", (buf: Buffer) => stderrBuf.push(buf));
+
+  const exitPromise = new Promise<[number, string | null]>(
+    (resolve, reject) => {
+      child.on("close", (code: number) => resolve([code ?? -1, null]));
+      child.on("error", (err: Error) => reject(err));
+    },
+  );
+
+  // Timeout guard: kill child if it exceeds timeoutMs
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    try { child.kill("SIGKILL"); } catch { /* already dead */ }
+  }, timeoutMs);
+
+  let code: number;
+  try {
+    [code] = await exitPromise;
+  } catch (err) {
+    clearTimeout(timer);
+    if (timedOut) {
+      throw new Error(`TraktCLI timed out after ${timeoutMs}ms`);
+    }
+    throw err;
+  }
+  clearTimeout(timer);
+
+  if (code !== 0) {
+    const rawStderr = Buffer.concat(stderrBuf).toString("utf8");
+    const sanitized = sanitizeStderr(rawStderr);
+    throw new Error(
+      `TraktCLI exited with code ${code}: ${sanitized.trim() || "no output"}`,
+    );
+  }
+
+  const stdout = Buffer.concat(stdoutBuf).toString("utf8").trim();
+  if (!stdout) throw new Error("TraktCLI returned empty output");
+
+  try {
+    return JSON.parse(stdout);
+  } catch {
+    throw new Error(
+      `TraktCLI returned malformed JSON: ${stdout.slice(0, 200)}`,
+    );
+  }
+}
 
 export interface DiscoverTraktCliOptions {
   configuredPath?: string | null;
