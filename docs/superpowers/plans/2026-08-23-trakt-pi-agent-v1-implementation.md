@@ -13,19 +13,23 @@
 | Package | Version | Purpose |
 |---------|---------|--------|
 | `@modelcontextprotocol/sdk` | ^1.30.0 | MCP stdio server SDK |
-| `better-sqlite3` | ^13.0.3 | SQLite driver (sync, native) |
+| `better-sqlite3` | ^13.0.3 | SQLite driver (sync, native); ships its own TS declarations |
 | `yaml` | ^2.9.0 | YAML parser for ~/.trakt.yaml |
 | `typescript` | ^5.9.0 | TypeScript compiler |
 | `vitest` | ^3.1.0 | Test runner |
 | `eslint` | ^9.30.0 | Lint tooling |
+| `typescript-eslint` | ^8.67.0 | TypeScript parser + ESLint plugin for flat config |
+| `@types/node` | ^22.21.0 | Node 22 LTS type declarations |
 
 Notes:
 - `better-sqlite3` is chosen over `sql.js` for native performance and WAL support.
   It requires native compilation but is the standard for Node.js desktop tools.
+  Ships its own TypeScript declarations (v9+); no `@types/better-sqlite3` needed.
 - `yaml` is the minimal YAML parser sufficient for `~/.trakt.yaml`.
-- ESLint 9+ uses flat config (`eslint.config.js`).
+- ESLint 9+ uses flat config (`eslint.config.js`) with `typescript-eslint`.
 - TypeScript 5.9+ for ESM module resolution and strict mode defaults.
 - Vitest 3+ for native ESM and Vite integration.
+- `@types/node` ^22.21.0 matches the Node 22 LTS runtime baseline.
 
 **Spec:** docs/superpowers/specs/2026-08-23-trakt-pi-agent-design.md
 
@@ -34,9 +38,11 @@ Notes:
 ## Execution Policy
 
 - One active subagent at a time.
+- Same provider/model as main agent for every subagent (`llama-swap/Qwen3.6-28B-REAP20-A3B-Q4_K_M`).
+- Same thinking level as main (`high`) unless a task explicitly requires otherwise.
 - Fresh isolated context for every implementation task.
 - Subagent receives only its task brief and required files.
-- No parallel implementation.
+- No parallel inference.
 - Main agent verifies every diff.
 - Main agent reruns relevant tests.
 - Main agent owns commit and push.
@@ -150,29 +156,44 @@ trakt-pi-agent/
 
 ## Task 1 — Node/TypeScript Project Foundation
 
-**Spec coverage:** Section 2 (Tech Stack), Section 11 (Testing Plan)
+**Spec coverage:** Section 2 (Tech Stack), Section 11 (Testing Plan), Section 12 (CI)
 
 **Goal:** Initialize the project with TypeScript, test runner, lint, typecheck, build, and minimal structure. No MCP functionality yet.
 
 **Files to create:**
 - `package.json` (name: `trakt-pi-agent`, type: `module`, scripts: `test`, `test:live`, `lint`, `typecheck`, `build`, `clean`)
+- `package-lock.json` (produced by `npm install`)
 - `tsconfig.json` (ESM, strict, outDir `dist`, rootDir `src`)
-- `eslint.config.js` (ESLint 9+ flat config, TypeScript)
+- `eslint.config.js` (ESLint 9+ flat config with `typescript-eslint`)
 - `vitest.config.ts`
+- `src/index.ts` (minimal real entrypoint: import-safe, exits cleanly, writes nothing to stdout, does not start MCP)
+- `tests/smoke/foundation-entrypoint.test.ts` (verifies src/index.ts invariants)
 - `tests/unit/` directory structure
 - `tests/integration/` directory structure
 - `tests/contract/` directory structure
 - `tests/smoke/` directory structure
 
-**TDD steps:**
-1. Run `npm test` — expect RED (no tests configured yet).
-2. Configure vitest in `vitest.config.ts` and `package.json`.
-3. Run `npm test` — expect GREEN (empty test suite passes).
-4. Run `npm run typecheck` — expect GREEN.
-5. Run `npm run build` — expect GREEN.
-6. Main agent verifies diff.
-7. Commit: `chore: initialize TypeScript project`
-8. Push.
+**Steps:**
+1. Create `package.json` with the dependency baseline versions.
+2. Run `npm install` to produce `package-lock.json`.
+3. Write `src/index.ts` as a minimal real entrypoint contract.
+4. Write `tests/smoke/foundation-entrypoint.test.ts` verifying:
+   - `src/index.ts` imports without error
+   - Exits cleanly
+   - Writes nothing to stdout
+5. Run `npm test` — expect GREEN.
+6. Run `npm run lint` — expect GREEN.
+7. Run `npm run typecheck` — expect GREEN.
+8. Run `npm run build` — expect GREEN.
+9. Main agent verifies diff.
+10. Commit: `chore: initialize TypeScript project`
+11. Push.
+
+**Dependency reproducibility:**
+- `package.json` uses approved version ranges/floors.
+- `package-lock.json` is committed.
+- CI uses `npm ci` (not `npm install`).
+- `npm install` is used only when intentionally updating dependencies.
 
 ---
 
@@ -313,6 +334,8 @@ trakt-pi-agent/
 | 1 | tsconfig.json | CREATE |
 | 1 | eslint.config.js | CREATE |
 | 1 | vitest.config.ts | CREATE |
+| 1 | src/index.ts | CREATE |
+| 1 | package-lock.json | CREATE (produced) |
 | 2 | src/config/paths.ts | CREATE |
 | 2 | src/config/config.ts | CREATE |
 | 3 | src/trakt/cli.ts | CREATE |
@@ -333,6 +356,7 @@ trakt-pi-agent/
 | 11 | src/sync/incremental-sync.ts | CREATE |
 | 11 | src/sync/last-activities.ts | CREATE |
 | 12 | (modifies sync engine) | MODIFY |
+| 13 | src/index.ts | MODIFY (wire MCP stdio server) |
 | 13 | src/mcp/server.ts | CREATE |
 | 14 | src/mcp/tools/trakt-history.ts | CREATE |
 | 15 | src/mcp/tools/trakt-progress.ts | CREATE |
@@ -342,7 +366,9 @@ trakt-pi-agent/
 | 19 | src/mcp/tools/trakt-sync.ts | CREATE |
 | 19 | src/mcp/tools/trakt-sync-status.ts | CREATE |
 | 19 | src/mcp/tools/trakt-cache-stats.ts | CREATE |
-| 21 | src/logging/logger.ts | CREATE |
+| 20 | src/logging/logger.ts | CREATE |
+| 21 | tests/unit/credential-leakage.test.ts | CREATE |
+| 21 | tests/unit/credential-scan.test.ts | CREATE |
 | 22 | .github/workflows/ci.yml | CREATE |
 | 23 | docs/superpowers/guides/v1-setup-and-usage.md | CREATE |
 
@@ -742,28 +768,7 @@ No file is marked CREATE by multiple tasks.
 
 ---
 
-## Task 20 — Aggregate Security Regression Suite
-
-**Spec coverage:** Section 9 (Security and Authentication)
-
-**Goal:** Run aggregate security regression tests that verify all previously-introduced security guarantees together. Credential-leak prevention tests were introduced test-first in Tasks 4, 5, and 10. This task runs them as a regression gate.
-
-**Files to create:**
-- `tests/unit/credential-leakage.test.ts` — aggregate regression tests
-- `tests/unit/credential-scan.test.ts` — static scan for credential patterns in source
-
-**Steps:**
-1. Run all previously-written credential-leak tests (from Tasks 4, 5, and 10) — expect GREEN.
-2. Run static scan: grep all source files for literal `access_token`, `refresh_token`, `client_id`, `client_secret` in non-redacted contexts.
-3. Verify no MCP tool output formatting includes raw credential values.
-4. Verify logging does not include credential values.
-5. Main agent verifies results.
-6. Commit: `test: add aggregate security regression suite`
-7. Push.
-
----
-
-## Task 21 — Logging Strategy
+## Task 20 — Logging Strategy
 
 **Spec coverage:** Section 5.2 (Local Files), Section 9 (Security), Section 17 (Error Handling)
 
@@ -775,16 +780,36 @@ No file is marked CREATE by multiple tasks.
 
 **TDD steps:**
 1. Write `tests/unit/logging.test.ts` testing:
-   - Log output to `logs/` under platform data directory
-   - Sanitized structured diagnostics (no raw credential values)
-   - No credential values logged (access_token, refresh_token, client_id, client_secret)
-   - Errors exposed to MCP are sanitized separately from detailed local diagnostics
-   - `~/.trakt.yaml` contents are never logged
+   - Log directory resolution under platform data directory
+   - Credential redaction (access_token, refresh_token, client_id, client_secret)
+   - No raw `~/.trakt.yaml` contents logged
+   - Sanitized structured diagnostics
 2. Run tests — expect RED.
 3. Implement `src/logging/logger.ts` with `console.warn` for errors, `console.debug` for sync events, no logging for successful operations.
 4. Run tests — expect GREEN.
 5. Main agent verifies diff.
 6. Commit: `feat: add minimal logging with credential redaction`
+7. Push.
+
+---
+
+## Task 21 — Aggregate Security Regression Suite
+
+**Spec coverage:** Section 9 (Security and Authentication)
+
+**Goal:** Run aggregate security regression tests that verify all previously-introduced security guarantees together. Credential-leak prevention tests were introduced test-first in Tasks 4, 5, 10, and 20. This task runs them as a regression gate without manufacturing a fake RED phase.
+
+**Files to create:**
+- `tests/unit/credential-leakage.test.ts` — aggregate regression tests
+- `tests/unit/credential-scan.test.ts` — static scan for credential patterns in source
+
+**Steps:**
+1. Run all previously-written credential-leak tests (from Tasks 4, 5, 10, and 20) — expect GREEN.
+2. Run static scan: grep all source files for literal `access_token`, `refresh_token`, `client_id`, `client_secret` in non-redacted contexts.
+3. Verify no MCP tool output formatting includes raw credential values.
+4. Verify logging (from Task 20) does not include credential values.
+5. Main agent verifies results.
+6. Commit: `test: add aggregate security regression suite`
 7. Push.
 
 ---
@@ -801,7 +826,7 @@ No file is marked CREATE by multiple tasks.
 **TDD steps:**
 1. Write CI workflow with matrix: Windows, Linux, macOS.
 2. Steps:
-   - Install Node.js
+   - Use Node.js 22 LTS (`actions/setup-node@v4` with `node-version: '22'`)
    - Install build tools for native deps (python, make, gcc/clang)
    - `npm ci` (installs better-sqlite3 with prebuilt binaries or compiles)
    - lint, typecheck, test, build
@@ -852,7 +877,7 @@ No file is marked CREATE by multiple tasks.
 3. Run typecheck: `npm run typecheck`
 4. Run full tests: `npm test`
 5. Run MCP smoke test (from Task 13)
-6. Run credential scan (from Task 20)
+6. Run credential scan (from Task 21)
 7. `git status` — must be clean
 8. If documentation/metadata needs changes, commit separately.
 9. If all green and no files changed: report PASS at existing HEAD (no artificial commit).
