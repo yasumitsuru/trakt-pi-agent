@@ -8,6 +8,25 @@
 
 **Tech Stack:** TypeScript, Node.js, MCP SDK, SQLite
 
+## Dependency Baseline
+
+| Package | Version | Purpose |
+|---------|---------|--------|
+| `@modelcontextprotocol/sdk` | ^1.30.0 | MCP stdio server SDK |
+| `better-sqlite3` | ^13.0.3 | SQLite driver (sync, native) |
+| `yaml` | ^2.9.0 | YAML parser for ~/.trakt.yaml |
+| `typescript` | ^5.9.0 | TypeScript compiler |
+| `vitest` | ^3.1.0 | Test runner |
+| `eslint` | ^9.30.0 | Lint tooling |
+
+Notes:
+- `better-sqlite3` is chosen over `sql.js` for native performance and WAL support.
+  It requires native compilation but is the standard for Node.js desktop tools.
+- `yaml` is the minimal YAML parser sufficient for `~/.trakt.yaml`.
+- ESLint 9+ uses flat config (`eslint.config.js`).
+- TypeScript 5.9+ for ESM module resolution and strict mode defaults.
+- Vitest 3+ for native ESM and Vite integration.
+
 **Spec:** docs/superpowers/specs/2026-08-23-trakt-pi-agent-design.md
 
 ---
@@ -15,7 +34,6 @@
 ## Execution Policy
 
 - One active subagent at a time.
-- Same model as main agent for every subagent.
 - Fresh isolated context for every implementation task.
 - Subagent receives only its task brief and required files.
 - No parallel implementation.
@@ -35,7 +53,7 @@
 trakt-pi-agent/
 ├── package.json
 ├── tsconfig.json
-├── .eslintrc.json
+├── eslint.config.js
 ├── vitest.config.ts
 ├── .gitignore
 ├── LICENSE
@@ -74,17 +92,19 @@ trakt-pi-agent/
 │   │       └── search-cache.ts
 │   ├── classification/
 │   │   └── media-category.ts
-│   └── mcp/
-│       ├── server.ts
-│       └── tools/
-│           ├── trakt-history.ts
-│           ├── trakt-progress.ts
-│           ├── trakt-watchlist.ts
-│           ├── trakt-calendar.ts
-│           ├── trakt-search.ts
-│           ├── trakt-sync.ts
-│           ├── trakt-sync-status.ts
-│           └── trakt-cache-stats.ts
+│   ├── mcp/
+│   │   ├── server.ts
+│   │   └── tools/
+│   │       ├── trakt-history.ts
+│   │       ├── trakt-progress.ts
+│   │       ├── trakt-watchlist.ts
+│   │       ├── trakt-calendar.ts
+│   │       ├── trakt-search.ts
+│   │       ├── trakt-sync.ts
+│   │       ├── trakt-sync-status.ts
+│   │       └── trakt-cache-stats.ts
+│   └── logging/
+│       └── logger.ts
 └── tests/
     ├── unit/
     │   ├── media-category.test.ts
@@ -92,7 +112,19 @@ trakt-pi-agent/
     │   ├── cache-rules.test.ts
     │   ├── cross-platform-paths.test.ts
     │   ├── trakt-cli-parsing.test.ts
-    │   └── mcp-filters.test.ts
+    │   ├── trakt-cli-adapter.test.ts
+    │   ├── auth-reader.test.ts
+    │   ├── api-adapter.test.ts
+    │   ├── media-types.test.ts
+    │   ├── media-schema.test.ts
+    │   ├── history-repo.test.ts
+    │   ├── progress-repo.test.ts
+    │   ├── watchlist-repo.test.ts
+    │   ├── sync-state-repo.test.ts
+    │   ├── search-cache-repo.test.ts
+    │   ├── credential-leakage.test.ts
+    │   ├── credential-scan.test.ts
+    │   └── logging.test.ts
     ├── integration/
     │   ├── sqlite.test.ts
     │   ├── migrations.test.ts
@@ -101,7 +133,15 @@ trakt-pi-agent/
     │   └── stale-cache.test.ts
     ├── contract/
     │   ├── tool-schemas.test.ts
-    │   └── structured-responses.test.ts
+    │   ├── structured-responses.test.ts
+    │   ├── trakt-history.test.ts
+    │   ├── trakt-progress.test.ts
+    │   ├── trakt-watchlist.test.ts
+    │   ├── trakt-calendar.test.ts
+    │   ├── trakt-search.test.ts
+    │   ├── trakt-sync.test.ts
+    │   ├── trakt-sync-status.test.ts
+    │   └── trakt-cache-stats.test.ts
     └── smoke/
         └── server-start.test.ts
 ```
@@ -110,34 +150,29 @@ trakt-pi-agent/
 
 ## Task 1 — Node/TypeScript Project Foundation
 
-**Spec coverage:** Section 2 (Tech Stack), Section 11 (Testing Plan), Section 12 (CI)
+**Spec coverage:** Section 2 (Tech Stack), Section 11 (Testing Plan)
 
 **Goal:** Initialize the project with TypeScript, test runner, lint, typecheck, build, and minimal structure. No MCP functionality yet.
 
 **Files to create:**
 - `package.json` (name: `trakt-pi-agent`, type: `module`, scripts: `test`, `test:live`, `lint`, `typecheck`, `build`, `clean`)
 - `tsconfig.json` (ESM, strict, outDir `dist`, rootDir `src`)
-- `.eslintrc.json` (TypeScript ESLint)
+- `eslint.config.js` (ESLint 9+ flat config, TypeScript)
 - `vitest.config.ts`
-- `src/index.ts` (entry point stub)
-- `src/config/paths.ts` (stub)
-- `src/config/config.ts` (stub)
 - `tests/unit/` directory structure
 - `tests/integration/` directory structure
 - `tests/contract/` directory structure
 - `tests/smoke/` directory structure
-- `.github/workflows/ci.yml` (scaffold with TODO for matrix)
 
 **TDD steps:**
-1. Write `tests/smoke/server-start.test.ts` that imports `src/index.ts` and verifies the module loads without error.
-2. Run `npm test` — expect RED (no tests configured yet).
-3. Configure vitest in `vitest.config.ts` and `package.json`.
-4. Run `npm test` — expect GREEN.
-5. Run `npm run typecheck` — expect GREEN.
-6. Run `npm run build` — expect GREEN.
-7. Main agent verifies diff.
-8. Commit: `chore: initialize TypeScript project`
-9. Push.
+1. Run `npm test` — expect RED (no tests configured yet).
+2. Configure vitest in `vitest.config.ts` and `package.json`.
+3. Run `npm test` — expect GREEN (empty test suite passes).
+4. Run `npm run typecheck` — expect GREEN.
+5. Run `npm run build` — expect GREEN.
+6. Main agent verifies diff.
+7. Commit: `chore: initialize TypeScript project`
+8. Push.
 
 ---
 
@@ -179,7 +214,7 @@ trakt-pi-agent/
 - `tests/unit/trakt-cli-parsing.test.ts`
 
 **TDD steps:**
-1. Write `tests/unit/trakt-cli-parsing.test.ts` testing PATH resolution with mocked `process.env.PATH`.
+1. Write `tests/unit/trakt-cli-parsing.test.ts` testing PATH resolution with mocked `process.env.PATH`, including explicit test case for `trakt-cli.exe` discovery on Windows.
 2. Run tests — expect RED.
 3. Implement `discoverTraktCli()` in `src/trakt/cli.ts`.
 4. Run tests — expect GREEN.
@@ -243,7 +278,7 @@ trakt-pi-agent/
 
 **Spec coverage:** Section 5 (Cache), Section 6 (Data Model), Section 11.2 (Integration Tests)
 
-**Goal:** Implement SQLite database initialization, versioned migrations, foreign keys, schema version tracking.
+**Goal:** Implement SQLite database initialization, versioned migrations from v1 onward, foreign keys, schema version tracking.
 
 **Files to create:**
 - `src/cache/database.ts` — `initDatabase(): Promise<void>`, `getConnection(): Database`
@@ -256,7 +291,11 @@ trakt-pi-agent/
 2. Run tests — expect RED.
 3. Implement `src/cache/database.ts`.
 4. Run tests — expect GREEN.
-5. Write `tests/integration/migrations.test.ts` testing migration v1 → v2 → v3.
+5. Write `tests/integration/migrations.test.ts` testing:
+   - Fresh DB applies schema v1
+   - Current schema version is recorded
+   - Rerunning migrations is idempotent
+   - Migration registry supports adding future versions
 6. Run tests — expect RED.
 7. Implement `src/cache/migrations.ts` with version table and migration registry.
 8. Run tests — expect GREEN.
@@ -266,29 +305,165 @@ trakt-pi-agent/
 
 ---
 
-## Task 7 — Media Schema and Repositories
+## File Ownership
+
+| Task | File | Ownership |
+|------|------|-----------|
+| 1 | package.json | CREATE |
+| 1 | tsconfig.json | CREATE |
+| 1 | eslint.config.js | CREATE |
+| 1 | vitest.config.ts | CREATE |
+| 2 | src/config/paths.ts | CREATE |
+| 2 | src/config/config.ts | CREATE |
+| 3 | src/trakt/cli.ts | CREATE |
+| 4 | src/trakt/cli.ts | MODIFY (add executeCommand) |
+| 5 | src/trakt/auth.ts | CREATE |
+| 6 | src/cache/database.ts | CREATE |
+| 6 | src/cache/migrations.ts | CREATE |
+| 7A | src/trakt/types.ts | CREATE |
+| 7A | src/cache/repositories/media.ts | CREATE |
+| 7B | src/cache/repositories/history.ts | CREATE |
+| 7C | src/cache/repositories/progress.ts | CREATE |
+| 7D | src/cache/repositories/watchlist.ts | CREATE |
+| 7E | src/cache/repositories/sync-state.ts | CREATE |
+| 7E | src/cache/repositories/search-cache.ts | CREATE |
+| 8 | src/classification/media-category.ts | CREATE |
+| 9 | src/sync/initial-sync.ts | CREATE |
+| 10 | src/trakt/api.ts | CREATE |
+| 11 | src/sync/incremental-sync.ts | CREATE |
+| 11 | src/sync/last-activities.ts | CREATE |
+| 12 | (modifies sync engine) | MODIFY |
+| 13 | src/mcp/server.ts | CREATE |
+| 14 | src/mcp/tools/trakt-history.ts | CREATE |
+| 15 | src/mcp/tools/trakt-progress.ts | CREATE |
+| 16 | src/mcp/tools/trakt-watchlist.ts | CREATE |
+| 17 | src/mcp/tools/trakt-calendar.ts | CREATE |
+| 18 | src/mcp/tools/trakt-search.ts | CREATE |
+| 19 | src/mcp/tools/trakt-sync.ts | CREATE |
+| 19 | src/mcp/tools/trakt-sync-status.ts | CREATE |
+| 19 | src/mcp/tools/trakt-cache-stats.ts | CREATE |
+| 21 | src/logging/logger.ts | CREATE |
+| 22 | .github/workflows/ci.yml | CREATE |
+| 23 | docs/superpowers/guides/v1-setup-and-usage.md | CREATE |
+
+No file is marked CREATE by multiple tasks.
+
+---
+
+## Task 7A — Core Media Schema and Shared Types
 
 **Spec coverage:** Section 6 (Data Model)
 
-**Goal:** Implement all repository tables: media, history, progress, watchlist, sync_state, search_cache.
+**Goal:** Implement shared Trakt types and media schema as the foundation for all repositories.
 
 **Files to create:**
-- `src/cache/repositories/media.ts`
-- `src/cache/repositories/history.ts`
-- `src/cache/repositories/progress.ts`
-- `src/cache/repositories/watchlist.ts`
-- `src/cache/repositories/sync-state.ts`
-- `src/cache/repositories/search-cache.ts`
-- `src/trakt/types.ts` — all type definitions
+- `src/trakt/types.ts` — all type definitions (Media, HistoryEntry, ProgressEntry, WatchlistEntry, SyncState, SearchCacheEntry)
+- `src/cache/repositories/media.ts` — media table schema and CRUD
+- `tests/unit/media-types.test.ts` — type shape tests
+- `tests/unit/media-schema.test.ts` — media table creation tests
 
 **TDD steps:**
-1. Write `tests/unit/media-schema.test.ts` testing schema creation for all tables.
+1. Write `tests/unit/media-types.test.ts` testing type shapes.
 2. Run tests — expect RED.
-3. Implement all repository files with table creation and basic CRUD.
+3. Implement `src/trakt/types.ts`.
+4. Run tests — expect GREEN.
+5. Write `tests/unit/media-schema.test.ts` testing media table creation.
+6. Run tests — expect RED.
+7. Implement `src/cache/repositories/media.ts`.
+8. Run tests — expect GREEN.
+9. Main agent verifies diff.
+10. Commit: `feat: add shared types and media schema`
+11. Push.
+
+---
+
+## Task 7B — History Repository
+
+**Spec coverage:** Section 6.2 (History)
+
+**Goal:** Implement history table schema and CRUD operations.
+
+**Files to create:**
+- `src/cache/repositories/history.ts` — history table schema and CRUD
+- `tests/unit/history-repo.test.ts`
+
+**TDD steps:**
+1. Write `tests/unit/history-repo.test.ts` testing history table creation and CRUD.
+2. Run tests — expect RED.
+3. Implement `src/cache/repositories/history.ts`.
 4. Run tests — expect GREEN.
 5. Main agent verifies diff.
-6. Commit: `feat: add cache repositories`
+6. Commit: `feat: add history repository`
 7. Push.
+
+---
+
+## Task 7C — Progress Repository
+
+**Spec coverage:** Section 6.3 (Progress)
+
+**Goal:** Implement progress table schema and CRUD operations.
+
+**Files to create:**
+- `src/cache/repositories/progress.ts` — progress table schema and CRUD
+- `tests/unit/progress-repo.test.ts`
+
+**TDD steps:**
+1. Write `tests/unit/progress-repo.test.ts` testing progress table creation and CRUD.
+2. Run tests — expect RED.
+3. Implement `src/cache/repositories/progress.ts`.
+4. Run tests — expect GREEN.
+5. Main agent verifies diff.
+6. Commit: `feat: add progress repository`
+7. Push.
+
+---
+
+## Task 7D — Watchlist Repository
+
+**Spec coverage:** Section 6.4 (Watchlist)
+
+**Goal:** Implement watchlist table schema and CRUD operations.
+
+**Files to create:**
+- `src/cache/repositories/watchlist.ts` — watchlist table schema and CRUD
+- `tests/unit/watchlist-repo.test.ts`
+
+**TDD steps:**
+1. Write `tests/unit/watchlist-repo.test.ts` testing watchlist table creation and CRUD.
+2. Run tests — expect RED.
+3. Implement `src/cache/repositories/watchlist.ts`.
+4. Run tests — expect GREEN.
+5. Main agent verifies diff.
+6. Commit: `feat: add watchlist repository`
+7. Push.
+
+---
+
+## Task 7E — Sync-State and Search-Cache Repositories
+
+**Spec coverage:** Section 6.5 (Sync State), Section 6.6 (Search Cache)
+
+**Goal:** Implement sync_state and search_cache table schemas and CRUD operations.
+
+**Files to create:**
+- `src/cache/repositories/sync-state.ts` — sync_state table schema and CRUD
+- `src/cache/repositories/search-cache.ts` — search_cache table schema and CRUD
+- `tests/unit/sync-state-repo.test.ts`
+- `tests/unit/search-cache-repo.test.ts`
+
+**TDD steps:**
+1. Write `tests/unit/sync-state-repo.test.ts` testing sync_state table creation and CRUD.
+2. Run tests — expect RED.
+3. Implement `src/cache/repositories/sync-state.ts`.
+4. Run tests — expect GREEN.
+5. Write `tests/unit/search-cache-repo.test.ts` testing search_cache table creation and CRUD.
+6. Run tests — expect RED.
+7. Implement `src/cache/repositories/search-cache.ts`.
+8. Run tests — expect GREEN.
+9. Main agent verifies diff.
+10. Commit: `feat: add sync-state and search-cache repositories`
+11. Push.
 
 ---
 
@@ -342,17 +517,17 @@ trakt-pi-agent/
 
 **Spec coverage:** Section 3.3 (Trakt API Adapter), Section 9 (Read-Only Guarantee)
 
-**Goal:** Implement minimal read-only API adapter. Primary endpoint: `/sync/last_activities`. No mutations.
+**Goal:** Implement minimal read-only HTTP API adapter. Primary endpoint: `/sync/last_activities`. No mutations.
 
 **Files to create:**
-- `src/trakt/api.ts`
+- `src/trakt/api.ts` — HTTP client for read-only Trakt API endpoints
 - `tests/unit/api-adapter.test.ts`
 
 **TDD steps:**
 1. Write `tests/unit/api-adapter.test.ts` testing:
-   - `/sync/last_activities` endpoint
-   - Read-only verification (no POST/PUT/DELETE methods)
-   - Authentication header construction from Trakt config
+   - `/sync/last_activities` endpoint returns parsed JSON
+   - Read-only enforcement (no POST/PUT/PATCH/DELETE methods exist)
+   - Authentication header construction from Trakt config credentials
 2. Run tests — expect RED.
 3. Implement `src/trakt/api.ts` with `getLastActivities()` and read-only enforcement.
 4. Run tests — expect GREEN.
@@ -404,7 +579,7 @@ trakt-pi-agent/
    - Auth error → sanitized error (no tokens exposed)
    - Invalid TraktCLI data → sync fails with sanitized error
 2. Run tests — expect RED.
-3. Implement stale-cache logic in sync engine.
+3. Implement stale-cache logic in `src/sync/incremental-sync.ts` (TTL check + cache fallback) and `src/sync/last-activities.ts` (error handling for Trakt unavailability).
 4. Run tests — expect GREEN.
 5. Main agent verifies diff.
 6. Commit: `feat: add offline cache fallback`
@@ -567,32 +742,54 @@ trakt-pi-agent/
 
 ---
 
-## Task 20 — Security Regression Suite
+## Task 20 — Aggregate Security Regression Suite
 
 **Spec coverage:** Section 9 (Security and Authentication)
 
-**Goal:** Test that MCP/logs do not expose access-token, refresh-token, client-id, client-secret.
+**Goal:** Run aggregate security regression tests that verify all previously-introduced security guarantees together. Credential-leak prevention tests were introduced test-first in Tasks 4, 5, and 10. This task runs them as a regression gate.
 
 **Files to create:**
-- `tests/unit/credential-leakage.test.ts`
+- `tests/unit/credential-leakage.test.ts` — aggregate regression tests
+- `tests/unit/credential-scan.test.ts` — static scan for credential patterns in source
 
-**TDD steps:**
-1. Write `tests/unit/credential-leakage.test.ts` testing:
-   - MCP tool outputs do not contain access_token
-   - MCP tool outputs do not contain refresh_token
-   - MCP tool outputs do not contain client_id
-   - MCP tool outputs do not contain client_secret
-   - Log outputs do not contain any of the above
-2. Run tests — expect RED.
-3. Implement redaction in all MCP tools and logging.
-4. Run tests — expect GREEN.
-5. Main agent verifies diff.
-6. Commit: `test: add credential leakage regression coverage`
+**Steps:**
+1. Run all previously-written credential-leak tests (from Tasks 4, 5, and 10) — expect GREEN.
+2. Run static scan: grep all source files for literal `access_token`, `refresh_token`, `client_id`, `client_secret` in non-redacted contexts.
+3. Verify no MCP tool output formatting includes raw credential values.
+4. Verify logging does not include credential values.
+5. Main agent verifies results.
+6. Commit: `test: add aggregate security regression suite`
 7. Push.
 
 ---
 
-## Task 21 — GitHub Actions
+## Task 21 — Logging Strategy
+
+**Spec coverage:** Section 5.2 (Local Files), Section 9 (Security), Section 17 (Error Handling)
+
+**Goal:** Implement a minimal local logging module before components depend on it. Define destination, sanitization, and redaction boundaries.
+
+**Files to create:**
+- `src/logging/logger.ts` — minimal structured logger with credential redaction
+- `tests/unit/logging.test.ts` — logging behavior tests
+
+**TDD steps:**
+1. Write `tests/unit/logging.test.ts` testing:
+   - Log output to `logs/` under platform data directory
+   - Sanitized structured diagnostics (no raw credential values)
+   - No credential values logged (access_token, refresh_token, client_id, client_secret)
+   - Errors exposed to MCP are sanitized separately from detailed local diagnostics
+   - `~/.trakt.yaml` contents are never logged
+2. Run tests — expect RED.
+3. Implement `src/logging/logger.ts` with `console.warn` for errors, `console.debug` for sync events, no logging for successful operations.
+4. Run tests — expect GREEN.
+5. Main agent verifies diff.
+6. Commit: `feat: add minimal logging with credential redaction`
+7. Push.
+
+---
+
+## Task 22 — GitHub Actions
 
 **Spec coverage:** Section 12 (CI)
 
@@ -603,14 +800,18 @@ trakt-pi-agent/
 
 **TDD steps:**
 1. Write CI workflow with matrix: Windows, Linux, macOS.
-2. Steps: lint, typecheck, test, build.
+2. Steps:
+   - Install Node.js
+   - Install build tools for native deps (python, make, gcc/clang)
+   - `npm ci` (installs better-sqlite3 with prebuilt binaries or compiles)
+   - lint, typecheck, test, build
 3. Main agent verifies workflow syntax.
 4. Commit: `ci: add cross-platform validation`
 5. Push.
 
 ---
 
-## Task 22 — User Documentation
+## Task 23 — User Documentation
 
 **Spec coverage:** Section 14 (Credits), Section 15 (Disclaimer), Section 13 (TraktCLI Dependency)
 
@@ -639,7 +840,7 @@ trakt-pi-agent/
 
 ---
 
-## Task 23 — Final v1 Integration Verification
+## Task 24 — Final v1 Integration Verification
 
 **Spec coverage:** All sections
 
@@ -650,12 +851,12 @@ trakt-pi-agent/
 2. Run lint: `npm run lint`
 3. Run typecheck: `npm run typecheck`
 4. Run full tests: `npm test`
-5. Run MCP smoke test
-6. Run credential scan
+5. Run MCP smoke test (from Task 13)
+6. Run credential scan (from Task 20)
 7. `git status` — must be clean
 8. If documentation/metadata needs changes, commit separately.
-9. If all green, commit: `chore: finalize v1 integration`
-10. Push.
+9. If all green and no files changed: report PASS at existing HEAD (no artificial commit).
+10. If a legitimate fix is required: implement/test that fix, its own commit, push, rerun final verification.
 
 ---
 
