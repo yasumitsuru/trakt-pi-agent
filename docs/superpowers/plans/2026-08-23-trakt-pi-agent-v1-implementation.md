@@ -13,23 +13,24 @@
 | Package | Version | Purpose |
 |---------|---------|--------|
 | `@modelcontextprotocol/sdk` | ^1.30.0 | MCP stdio server SDK |
-| `better-sqlite3` | ^13.0.3 | SQLite driver (sync, native); ships its own TS declarations |
+| `better-sqlite3` | ^13.0.3 | SQLite driver (sync, native) |
+| `@types/better-sqlite3` | ^9.6.0 | TypeScript definitions for better-sqlite3 (DefinitelyTyped) |
 | `yaml` | ^2.9.0 | YAML parser for ~/.trakt.yaml |
 | `typescript` | ^5.9.0 | TypeScript compiler |
 | `vitest` | ^3.1.0 | Test runner |
 | `eslint` | ^9.30.0 | Lint tooling |
 | `typescript-eslint` | ^8.67.0 | TypeScript parser + ESLint plugin for flat config |
-| `@types/node` | ^22.21.0 | Node 22 LTS type declarations |
+| `@types/node` | ^22.20.1 | Node 22 LTS type declarations |
 
 Notes:
 - `better-sqlite3` is chosen over `sql.js` for native performance and WAL support.
   It requires native compilation but is the standard for Node.js desktop tools.
-  Ships its own TypeScript declarations (v9+); no `@types/better-sqlite3` needed.
+  TypeScript definitions provided by `@types/better-sqlite3` (DefinitelyTyped).
 - `yaml` is the minimal YAML parser sufficient for `~/.trakt.yaml`.
 - ESLint 9+ uses flat config (`eslint.config.js`) with `typescript-eslint`.
 - TypeScript 5.9+ for ESM module resolution and strict mode defaults.
 - Vitest 3+ for native ESM and Vite integration.
-- `@types/node` ^22.21.0 matches the Node 22 LTS runtime baseline.
+- `@types/node` ^22.20.1 matches the Node 22 LTS runtime baseline.
 
 **Spec:** docs/superpowers/specs/2026-08-23-trakt-pi-agent-design.md
 
