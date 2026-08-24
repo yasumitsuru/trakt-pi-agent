@@ -36,7 +36,7 @@ describe("ttl", () => {
     const cfgPath = path.join(tmpDir, "config.json");
     fs.writeFileSync(cfgPath, JSON.stringify(cfg), "utf8");
 
-    const loaded = loadConfig(cfgPath);
+    const loaded = loadConfig({ configPath: cfgPath });
     expect(loaded.ttlSeconds).toBe(600);
   });
 
@@ -52,7 +52,7 @@ describe("ttl", () => {
     const cfgPath = path.join(tmpDir, "config.json");
     fs.writeFileSync(cfgPath, JSON.stringify(cfg), "utf8");
 
-    const loaded = loadConfig(cfgPath);
+    const loaded = loadConfig({ configPath: cfgPath });
     expect(loaded.traktCliPath).toBe("/usr/local/bin/trakt-cli");
   });
 
@@ -75,5 +75,129 @@ describe("ttl", () => {
     const cfgPath = path.join(tmpDir, "config.json");
     const loaded = loadConfig(cfgPath);
     expect(loaded.configPath).toContain("config.json");
+  });
+
+  describe("loadConfig with dataDir option", () => {
+    it("uses dataDir for configPath and cacheDbPath", () => {
+      const loaded = loadConfig({ dataDir: tmpDir });
+      expect(loaded.configPath).toBe(path.join(tmpDir, "config.json"));
+      expect(loaded.cacheDbPath).toBe(path.join(tmpDir, "trakt-cache.db"));
+    });
+
+    it("uses configPath with dataDir", () => {
+      const customCfg = path.join(tmpDir, "custom.json");
+      const loaded = loadConfig({ dataDir: tmpDir, configPath: customCfg });
+      expect(loaded.configPath).toBe(customCfg);
+      expect(loaded.cacheDbPath).toBe(path.join(tmpDir, "trakt-cache.db"));
+    });
+
+    it("derives dataDir from configPath when only configPath is supplied", () => {
+      const customCfg = path.join(tmpDir, "custom.json");
+      const loaded = loadConfig({ configPath: customCfg });
+      expect(loaded.configPath).toBe(customCfg);
+      expect(loaded.cacheDbPath).toBe(path.join(tmpDir, "trakt-cache.db"));
+    });
+  });
+
+  describe("TTL validation", () => {
+    it("returns default TTL when config has invalid JSON", () => {
+      const cfgPath = path.join(tmpDir, "config.json");
+      fs.writeFileSync(cfgPath, "not valid json", "utf8");
+
+      const loaded = loadConfig({ dataDir: tmpDir });
+      expect(loaded.ttlSeconds).toBe(300);
+    });
+
+    it("returns default TTL when TTL is 0", () => {
+      const cfg: AppConfig = { ttlSeconds: 0 };
+      const cfgPath = path.join(tmpDir, "config.json");
+      fs.writeFileSync(cfgPath, JSON.stringify(cfg), "utf8");
+
+      const loaded = loadConfig({ dataDir: tmpDir });
+      expect(loaded.ttlSeconds).toBe(300);
+    });
+
+    it("returns default TTL when TTL is negative", () => {
+      const cfg: AppConfig = { ttlSeconds: -10 };
+      const cfgPath = path.join(tmpDir, "config.json");
+      fs.writeFileSync(cfgPath, JSON.stringify(cfg), "utf8");
+
+      const loaded = loadConfig({ dataDir: tmpDir });
+      expect(loaded.ttlSeconds).toBe(300);
+    });
+
+    it("returns default TTL when TTL is a string", () => {
+      const cfg: AppConfig = { ttlSeconds: "300" as unknown as number };
+      const cfgPath = path.join(tmpDir, "config.json");
+      fs.writeFileSync(cfgPath, JSON.stringify(cfg), "utf8");
+
+      const loaded = loadConfig({ dataDir: tmpDir });
+      expect(loaded.ttlSeconds).toBe(300);
+    });
+
+    it("returns default TTL when TTL is null", () => {
+      const cfg: AppConfig = { ttlSeconds: null as unknown as number };
+      const cfgPath = path.join(tmpDir, "config.json");
+      fs.writeFileSync(cfgPath, JSON.stringify(cfg), "utf8");
+
+      const loaded = loadConfig({ dataDir: tmpDir });
+      expect(loaded.ttlSeconds).toBe(300);
+    });
+
+    it("accepts valid TTL override", () => {
+      const cfg: AppConfig = { ttlSeconds: 600 };
+      const cfgPath = path.join(tmpDir, "config.json");
+      fs.writeFileSync(cfgPath, JSON.stringify(cfg), "utf8");
+
+      const loaded = loadConfig({ dataDir: tmpDir });
+      expect(loaded.ttlSeconds).toBe(600);
+    });
+  });
+
+  describe("traktCliPath validation", () => {
+    it("accepts string traktCliPath", () => {
+      const cfg: AppConfig = { traktCliPath: "/usr/local/bin/trakt-cli" };
+      const cfgPath = path.join(tmpDir, "config.json");
+      fs.writeFileSync(cfgPath, JSON.stringify(cfg), "utf8");
+
+      const loaded = loadConfig({ dataDir: tmpDir });
+      expect(loaded.traktCliPath).toBe("/usr/local/bin/trakt-cli");
+    });
+
+    it("returns null when traktCliPath is null", () => {
+      const cfg: AppConfig = { traktCliPath: null };
+      const cfgPath = path.join(tmpDir, "config.json");
+      fs.writeFileSync(cfgPath, JSON.stringify(cfg), "utf8");
+
+      const loaded = loadConfig({ dataDir: tmpDir });
+      expect(loaded.traktCliPath).toBeNull();
+    });
+
+    it("returns null when traktCliPath is undefined", () => {
+      const cfg: AppConfig = { traktCliPath: undefined };
+      const cfgPath = path.join(tmpDir, "config.json");
+      fs.writeFileSync(cfgPath, JSON.stringify(cfg), "utf8");
+
+      const loaded = loadConfig({ dataDir: tmpDir });
+      expect(loaded.traktCliPath).toBeNull();
+    });
+
+    it("returns null when traktCliPath is a number", () => {
+      const cfg: AppConfig = { traktCliPath: 123 as unknown as string };
+      const cfgPath = path.join(tmpDir, "config.json");
+      fs.writeFileSync(cfgPath, JSON.stringify(cfg), "utf8");
+
+      const loaded = loadConfig({ dataDir: tmpDir });
+      expect(loaded.traktCliPath).toBeNull();
+    });
+
+    it("returns null when traktCliPath is an array", () => {
+      const cfg: AppConfig = { traktCliPath: ["/usr/bin/trakt"] as unknown as string };
+      const cfgPath = path.join(tmpDir, "config.json");
+      fs.writeFileSync(cfgPath, JSON.stringify(cfg), "utf8");
+
+      const loaded = loadConfig({ dataDir: tmpDir });
+      expect(loaded.traktCliPath).toBeNull();
+    });
   });
 });

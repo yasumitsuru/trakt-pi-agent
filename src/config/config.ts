@@ -7,6 +7,11 @@ export interface AppConfig {
   traktCliPath?: string | null;
 }
 
+export interface LoadConfigOptions {
+  dataDir?: string;
+  configPath?: string;
+}
+
 export interface Config {
   ttlSeconds: number;
   traktCliPath: string | null;
@@ -20,11 +25,23 @@ const CONFIG_FILE_NAME = "config.json";
 
 /**
  * Load configuration from a config.json file.
- * @param configPath - Optional explicit path. Defaults to <data dir>/config.json.
+ * @param options - Optional dataDir and/or configPath.
  */
-export function loadConfig(configPath?: string): Config {
-  const dataDir = getDataDirectory();
-  const resolvedConfigPath = configPath || path.join(dataDir, CONFIG_FILE_NAME);
+export function loadConfig(options?: LoadConfigOptions): Config {
+  let dataDir: string;
+  let resolvedConfigPath: string;
+
+  if (options?.dataDir) {
+    dataDir = options.dataDir;
+    resolvedConfigPath =
+      options.configPath || path.join(dataDir, CONFIG_FILE_NAME);
+  } else if (options?.configPath) {
+    resolvedConfigPath = options.configPath;
+    dataDir = path.dirname(resolvedConfigPath);
+  } else {
+    dataDir = getDataDirectory();
+    resolvedConfigPath = path.join(dataDir, CONFIG_FILE_NAME);
+  }
 
   let appConfig: AppConfig = {};
   try {
@@ -34,10 +51,34 @@ export function loadConfig(configPath?: string): Config {
     // Config file absent or invalid — use defaults.
   }
 
+  // Runtime TTL validation
+  let ttl: number;
+  const rawTtl = appConfig.ttlSeconds;
+  if (
+    typeof rawTtl === "number" &&
+    Number.isFinite(rawTtl) &&
+    rawTtl > 0
+  ) {
+    ttl = rawTtl;
+  } else {
+    ttl = DEFAULT_TTL;
+  }
+
+  // Runtime traktCliPath validation
+  let traktCliPath: string | null;
+  const rawCli = appConfig.traktCliPath;
+  if (typeof rawCli === "string") {
+    traktCliPath = rawCli;
+  } else {
+    traktCliPath = null;
+  }
+
+  const resolvedCacheDbPath = path.join(dataDir, CACHE_DB_NAME);
+
   return {
-    ttlSeconds: appConfig.ttlSeconds ?? DEFAULT_TTL,
-    traktCliPath: appConfig.traktCliPath ?? null,
-    cacheDbPath: path.join(dataDir, CACHE_DB_NAME),
+    ttlSeconds: ttl,
+    traktCliPath,
+    cacheDbPath: resolvedCacheDbPath,
     configPath: resolvedConfigPath,
   };
 }
